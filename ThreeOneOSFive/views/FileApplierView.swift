@@ -26,6 +26,7 @@ struct FileApplierView: View {
     @State private var selectedApp: InstalledApp?
     @State private var selectedSourceURLs: [URL] = []
     @State private var packageInspection: DetectedPackageInspection?
+    @State private var packagePassword: String = ""
     @State private var selectedPreset: TargetDestinationPreset = .documents
     @State private var customPath: String = ""
     @State private var autoBackup: Bool = true
@@ -60,7 +61,7 @@ struct FileApplierView: View {
     }
 
     private var canApply: Bool {
-        selectedApp != nil && !selectedSourceURLs.isEmpty && !isApplying
+        !selectedSourceURLs.isEmpty && !isApplying
     }
 
     private var hasZipFile: Bool {
@@ -72,11 +73,12 @@ struct FileApplierView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     headerBanner
-                    appSection
                     fileSection
-                    destinationSection
-                    optionsSection
-                    applyButtonSection
+                    if !selectedSourceURLs.isEmpty {
+                        destinationSection
+                        optionsSection
+                        applyButtonSection
+                    }
                     historySection
                 }
                 .padding(.horizontal, AppTheme.pageInset)
@@ -223,112 +225,6 @@ struct FileApplierView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    // MARK: - App Section
-
-    private var appSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeaderLabel(title: language.text("apply.select_app"), systemImage: "app.fill")
-
-            if let app = selectedApp {
-                VStack(spacing: 12) {
-                    HStack(spacing: 12) {
-                        if let icon = app.icon {
-                            Image(uiImage: icon)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 48, height: 48)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        } else {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(AppTheme.accent.opacity(0.15))
-                                Image(systemName: "app.fill")
-                                    .font(.system(size: 24))
-                                    .foregroundStyle(AppTheme.accent)
-                            }
-                            .frame(width: 48, height: 48)
-                        }
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(app.displayName)
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Text(app.bundleID)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-
-                        Spacer()
-
-                        Button {
-                            isShowingAppPicker = true
-                        } label: {
-                            Text(language.text("apply.change_app"))
-                                .font(.subheadline.weight(.medium))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(AppTheme.accent.opacity(0.12))
-                                .foregroundStyle(AppTheme.accent)
-                                .clipShape(Capsule())
-                        }
-                    }
-
-                    Divider()
-
-                    HStack {
-                        Button {
-                            isShowingContainerBrowser = true
-                        } label: {
-                            Label(language.text("apply.browse_container"), systemImage: "folder.badge.gearshape")
-                                .font(.subheadline)
-                                .foregroundStyle(AppTheme.accent)
-                        }
-                        Spacer()
-                    }
-                }
-                .padding(14)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            } else {
-                Button {
-                    isShowingAppPicker = true
-                } label: {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(AppTheme.accent.opacity(0.12))
-                                .frame(width: 42, height: 42)
-                            Image(systemName: "plus.app.fill")
-                                .font(.system(size: 20))
-                                .foregroundStyle(AppTheme.accent)
-                        }
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(language.text("apply.no_app_selected"))
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text(language.text("apply.select_app"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(14)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
     // MARK: - File Section
 
     private var fileSection: some View {
@@ -445,237 +341,183 @@ struct FileApplierView: View {
     // MARK: - Destination Section
 
     private var destinationSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeaderLabel(title: language.text("apply.destination"), systemImage: "folder.fill")
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeaderLabel(title: "Thông tin cài đặt & Đích đến", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
 
-            if let inspection = packageInspection, inspection.hasInternalPaths {
-                // Giao diện tự động đi theo cấu trúc thư mục nội bộ của tệp
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(AppTheme.accent.opacity(0.16))
-                                .frame(width: 40, height: 40)
-                            Image(systemName: "shippingbox.fill")
-                                .font(.system(size: 20))
-                                .foregroundStyle(AppTheme.accent)
-                        }
+            VStack(alignment: .leading, spacing: 14) {
+                // 1. Ứng dụng mục tiêu (Tự động nhận diện)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Ứng dụng được áp dụng:")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Tự động đi theo đường dẫn bên trong tệp")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(.primary)
-                            Text("Phát hiện \(inspection.entries.count) mục đích trong “\(selectedSourceURLs.first?.lastPathComponent ?? "")”.")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        Text("Tự động")
-                            .font(.system(size: 10, weight: .bold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.green.opacity(0.15))
-                            .foregroundStyle(.green)
-                            .clipShape(Capsule())
-                    }
-
-                    // Danh sách preview các đường dẫn đích bên trong gói
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Vị trí sẽ được giải nén & đưa vào \(selectedApp?.displayName ?? "ứng dụng"):")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        VStack(spacing: 4) {
-                            ForEach(Array(inspection.entries.prefix(6))) { entry in
-                                HStack(spacing: 8) {
-                                    Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text.fill")
-                                        .font(.caption2)
-                                        .foregroundStyle(entry.isDirectory ? Color.orange : AppTheme.accent)
-
-                                    Text(entry.targetRelativePath)
-                                        .font(.caption2.monospaced())
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(1)
-
-                                    Spacer()
-
-                                    Text(entry.formattedSize)
-                                        .font(.system(size: 10).monospaced())
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
-                                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            }
-
-                            if inspection.entries.count > 6 {
-                                HStack {
-                                    Spacer()
-                                    Text("...và \(inspection.entries.count - 6) mục khác trong tệp")
-                                        .font(.caption2.weight(.medium))
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                }
-                                .padding(.top, 2)
-                            }
-                        }
-                        .padding(8)
-                        .background(Color(uiColor: .tertiarySystemFill))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                            .padding(.top, 1)
-                        Text("Mỗi tệp sẽ tự động vào đúng thư mục nội bộ của nó. Bạn không cần chọn thư mục thủ công.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Divider()
-
-                    // Preview đường dẫn đích
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Đích đến của tệp khi áp dụng:")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: "arrow.right.circle.fill")
-                                .foregroundStyle(AppTheme.accent)
-                                .font(.subheadline)
-                                .padding(.top, 2)
-
-                            let appNameText = selectedApp?.bundleID ?? "[Chưa chọn App]"
-                            let fileName = selectedSourceURLs.first?.lastPathComponent ?? "tệp"
-                            Text("\(appNameText) ➔ (Tự động đi theo \(inspection.entries.count) đường dẫn bên trong \(fileName))")
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.primary)
-                                .lineLimit(3)
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(uiColor: .tertiarySystemFill))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                }
-                .padding(14)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            } else {
-                // Giao diện chọn thư mục thủ công (khi tệp đơn không có cấu trúc nội bộ)
-                VStack(alignment: .leading, spacing: 12) {
-                    // Preset chips
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(TargetDestinationPreset.allCases) { preset in
-                                Button {
-                                    selectedPreset = preset
-                                    customPath = preset.relativePath
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: preset.systemImage)
-                                            .font(.caption)
-                                        Text(language.text(preset.displayNameKey))
-                                            .font(.subheadline.weight(selectedPreset == preset ? .semibold : .regular))
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        selectedPreset == preset
-                                            ? AppTheme.accent
-                                            : Color(uiColor: .tertiarySystemFill)
-                                    )
-                                    .foregroundStyle(
-                                        selectedPreset == preset
-                                            ? Color.white
-                                            : Color.primary
-                                    )
-                                    .clipShape(Capsule())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    // Nút duyệt chọn thư mục trực tiếp trong app
                     if let app = selectedApp {
-                        Button {
-                            isShowingContainerBrowser = true
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "folder.badge.gearshape")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(AppTheme.accent)
+                        HStack(spacing: 12) {
+                            if let icon = app.icon {
+                                Image(uiImage: icon)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 40, height: 40)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            } else {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(AppTheme.accent.opacity(0.15))
+                                    Image(systemName: "app.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(AppTheme.accent)
+                                }
+                                .frame(width: 40, height: 40)
+                            }
 
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Duyệt chọn thư mục trong \(app.displayName)...")
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(app.displayName)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(.primary)
-                                    Text("Bấm vào đây để chọn đúng thư mục đích (hoặc file gốc cần đè)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                    Text("Tự động")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.green.opacity(0.15))
+                                        .foregroundStyle(.green)
+                                        .clipShape(Capsule())
                                 }
+                                Text(app.bundleID)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
 
+                            Spacer()
+
+                            Button {
+                                isShowingAppPicker = true
+                            } label: {
+                                Text("Đổi")
+                                    .font(.caption.weight(.medium))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(Color(uiColor: .tertiarySystemFill))
+                                    .foregroundStyle(AppTheme.accent)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .padding(10)
+                        .background(Color(uiColor: .tertiarySystemFill))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    } else {
+                        Button {
+                            isShowingAppPicker = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "plus.app.fill")
+                                    .foregroundStyle(AppTheme.accent)
+                                Text("Chạm để chọn ứng dụng...")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
                                 Spacer()
-
                                 Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
+                                    .font(.caption)
                                     .foregroundStyle(.tertiary)
                             }
                             .padding(12)
-                            .background(AppTheme.accent.opacity(0.12))
+                            .background(Color(uiColor: .tertiarySystemFill))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
+                }
 
-                    // Custom relative path field
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Đường dẫn tương đối trong container:")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                Divider()
 
-                        HStack {
-                            Text("/")
-                                .font(.subheadline.monospaced())
-                                .foregroundStyle(.secondary)
-                            TextField("Documents hoặc Library/Preferences...", text: $customPath)
-                                .font(.subheadline.monospaced())
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .onChange(of: customPath) { _ in
-                                    if selectedPreset != .custom {
-                                        selectedPreset = .custom
-                                    }
-                                }
-                        }
-                        .padding(10)
-                        .background(Color(uiColor: .tertiarySystemFill))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-
-                    // Preview đường dẫn đích thực tế
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Đích đến của tệp khi áp dụng:")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        HStack(alignment: .top, spacing: 6) {
-                            Image(systemName: "arrow.right.circle.fill")
+                // 2. Vị trí & Đường dẫn đích
+                let isPackage = packageInspection != nil
+                    || selectedSourceURLs.first?.pathExtension.lowercased() == "3105"
+                    || selectedSourceURLs.first?.pathExtension.lowercased() == "zip"
+                if isPackage {
+                    // Cấu trúc gói tự động
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "shippingbox.fill")
                                 .foregroundStyle(AppTheme.accent)
+                            Text("Tự động đi theo đường dẫn bên trong tệp")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text("Tự động")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.green.opacity(0.15))
+                                .foregroundStyle(.green)
+                                .clipShape(Capsule())
+                        }
+
+                        if let inspection = packageInspection, !inspection.entries.isEmpty {
+                            VStack(spacing: 4) {
+                                ForEach(Array(inspection.entries.prefix(6))) { entry in
+                                    HStack(spacing: 8) {
+                                        Image(systemName: entry.isDirectory ? "folder.fill" : "doc.text.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(entry.isDirectory ? Color.orange : AppTheme.accent)
+
+                                        Text(entry.targetRelativePath)
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+
+                                        Spacer()
+
+                                        Text(entry.formattedSize)
+                                            .font(.system(size: 10).monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(uiColor: .secondarySystemGroupedBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                }
+
+                                if inspection.entries.count > 6 {
+                                    Text("+ \(inspection.entries.count - 6) mục khác trong tệp")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.top, 2)
+                                }
+                            }
+                            .padding(8)
+                            .background(Color(uiColor: .tertiarySystemFill))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+
+                        if let inspection = packageInspection, inspection.isPasswordProtected && inspection.entries.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label("Tệp .3105 này có mật khẩu bảo vệ", systemImage: "lock.fill")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.orange)
+                                HStack {
+                                    SecureField("Nhập mật khẩu tệp...", text: $packagePassword)
+                                        .textFieldStyle(.roundedBorder)
+                                    Button("Mở khóa") {
+                                        unlockPackage()
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                }
+                            }
+                            .padding(10)
+                            .background(Color.orange.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+
+                        // Preview đích đến
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
                                 .font(.subheadline)
                                 .padding(.top, 2)
 
-                            let appNameText = selectedApp?.bundleID ?? "[Chưa chọn App]"
-                            let targetFolder = effectiveRelativePath.isEmpty ? "(Thư mục gốc)" : effectiveRelativePath
-                            let fileNames = selectedSourceURLs.isEmpty ? "[Tên tệp]" : selectedSourceURLs.map(\.lastPathComponent).joined(separator: ", ")
-                            Text("\(appNameText) ➔ / \(targetFolder) / \(fileNames)")
+                            let appNameText = selectedApp?.displayName ?? selectedApp?.bundleID ?? "[Chưa chọn App]"
+                            Text("\(appNameText) ➔ (Tự động đưa từng tệp con vào đúng thư mục bên trong)")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.primary)
                                 .lineLimit(3)
@@ -685,11 +527,61 @@ struct FileApplierView: View {
                         .background(Color(uiColor: .tertiarySystemFill))
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
+                } else {
+                    // Tệp đơn lẻ thông thường
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Chọn thư mục đích trong container:")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(TargetDestinationPreset.allCases) { preset in
+                                    Button {
+                                        selectedPreset = preset
+                                        customPath = preset.relativePath
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: preset.systemImage)
+                                                .font(.caption)
+                                            Text(language.text(preset.displayNameKey))
+                                                .font(.subheadline.weight(selectedPreset == preset ? .semibold : .regular))
+                                        }
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 7)
+                                        .background(selectedPreset == preset ? AppTheme.accent : Color(uiColor: .tertiarySystemFill))
+                                        .foregroundStyle(selectedPreset == preset ? Color.white : Color.primary)
+                                        .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        // Preview đích đến
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "arrow.right.circle.fill")
+                                .foregroundStyle(AppTheme.accent)
+                                .font(.subheadline)
+                                .padding(.top, 2)
+
+                            let appNameText = selectedApp?.displayName ?? "[Chưa chọn App]"
+                            let targetFolder = effectiveRelativePath.isEmpty ? "(Thư mục gốc)" : effectiveRelativePath
+                            let fileNames = selectedSourceURLs.map(\.lastPathComponent).joined(separator: ", ")
+                            Text("\(appNameText) ➔ / \(targetFolder) / \(fileNames)")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.primary)
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(uiColor: .tertiarySystemFill))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
                 }
-                .padding(14)
-                .background(Color(uiColor: .secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
+            .padding(14)
+            .background(Color(uiColor: .secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
@@ -753,11 +645,7 @@ struct FileApplierView: View {
     }
 
     private var validationHint: String {
-        if selectedApp == nil && selectedSourceURLs.isEmpty {
-            return "Vui lòng chọn ứng dụng đích và tệp cần áp dụng."
-        } else if selectedApp == nil {
-            return "Vui lòng chọn ứng dụng đích trước khi áp dụng."
-        } else if selectedSourceURLs.isEmpty {
+        if selectedSourceURLs.isEmpty {
             return "Vui lòng chọn ít nhất một tệp để áp dụng."
         }
         return ""
@@ -911,41 +799,64 @@ struct FileApplierView: View {
         packageInspection = nil
         guard let first = urls.first else { return }
 
-        // 1. Kiểm tra xem tệp có cấu trúc nội bộ (Gói .3105 hoặc Archive ZIP)
-        if urls.count == 1, let inspection = FileApplierService.inspectPackage(at: first), inspection.hasInternalPaths {
-            packageInspection = inspection
+        // 1. Phân tích gói tệp (thử giải mã theo mọi định dạng .3105 / ZIP / Project)
+        let inspection = FileApplierService.inspectPackage(
+            at: first,
+            password: packagePassword.isEmpty ? nil : packagePassword,
+            installedApps: discovery.apps
+        )
+        packageInspection = inspection
 
-            // Tự động gợi ý/chọn app nếu package có bundleID được định sẵn và user chưa chọn app
-            if let targetBundle = inspection.suggestedBundleID, !targetBundle.isEmpty {
-                if selectedApp == nil {
-                    if let found = discovery.apps.first(where: { $0.bundleID.lowercased() == targetBundle.lowercased() }) {
-                        selectedApp = found
-                    } else {
-                        let path = ContainerStore.resolveAppContainerPath(bundleID: targetBundle) ?? ""
-                        selectedApp = InstalledApp(
-                            bundleID: targetBundle,
-                            name: targetBundle,
-                            containerPath: path,
-                            version: "",
-                            icon: nil
-                        )
-                    }
-                }
-            }
-            return
+        // 2. Tự động nhận diện ứng dụng đích từ gói hoặc từ tên tệp
+        let targetBundle = inspection?.suggestedBundleID
+            ?? FileApplierService.guessBundleID(from: first.lastPathComponent, installedApps: discovery.apps)
+
+        if let bundle = targetBundle, !bundle.isEmpty {
+            autoSelectApp(bundleID: bundle)
         }
 
-        // 2. Gợi ý đường dẫn thông minh theo định dạng file
-        let ext = first.pathExtension.lowercased()
-        if ext == "plist" {
-            selectedPreset = .preferences
-            customPath = "Library/Preferences"
-        } else if ext == "zip" {
-            selectedPreset = .documents
-            customPath = "Documents"
-        } else if customPath.isEmpty {
-            selectedPreset = .documents
-            customPath = "Documents"
+        // 3. Nếu là file .3105: Luôn đảm bảo là package, không bao giờ rơi về copy Documents
+        if first.pathExtension.lowercased() == "3105" && packageInspection == nil {
+            let bundleID = targetBundle ?? "com.garena.ffvn"
+            packageInspection = DetectedPackageInspection(
+                payload: .patchProject(project: PatchProject(name: (first.lastPathComponent as NSString).deletingPathExtension, rules: [])),
+                suggestedBundleID: bundleID,
+                entries: [],
+                isPasswordProtected: false
+            )
+            if selectedApp == nil {
+                autoSelectApp(bundleID: bundleID)
+            }
+        }
+    }
+
+    private func autoSelectApp(bundleID: String) {
+        if let found = discovery.apps.first(where: { $0.bundleID.lowercased() == bundleID.lowercased() }) {
+            selectedApp = found
+        } else {
+            let path = ContainerStore.resolveAppContainerPath(bundleID: bundleID) ?? ""
+            let name = bundleID == "com.garena.ffvn" ? "Free Fire VN" : (bundleID == "com.dts.freefiremax" ? "Free Fire MAX" : bundleID)
+            selectedApp = InstalledApp(
+                bundleID: bundleID,
+                name: name,
+                containerPath: path,
+                version: "",
+                icon: nil
+            )
+        }
+    }
+
+    private func unlockPackage() {
+        guard let first = selectedSourceURLs.first else { return }
+        if let inspection = FileApplierService.inspectPackage(
+            at: first,
+            password: packagePassword,
+            installedApps: discovery.apps
+        ) {
+            packageInspection = inspection
+            if let targetBundle = inspection.suggestedBundleID {
+                autoSelectApp(bundleID: targetBundle)
+            }
         }
     }
 
@@ -957,7 +868,18 @@ struct FileApplierView: View {
     }
 
     private func executeApply() {
-        guard let app = selectedApp, !selectedSourceURLs.isEmpty else { return }
+        var targetApp = selectedApp
+        if targetApp == nil, let first = selectedSourceURLs.first {
+            let guessed = packageInspection?.suggestedBundleID
+                ?? FileApplierService.guessBundleID(from: first.lastPathComponent, installedApps: discovery.apps)
+                ?? "com.garena.ffvn"
+            autoSelectApp(bundleID: guessed)
+            targetApp = selectedApp
+        }
+        guard let app = targetApp, !selectedSourceURLs.isEmpty else {
+            isShowingAppPicker = true
+            return
+        }
         isApplying = true
 
         let sources = selectedSourceURLs

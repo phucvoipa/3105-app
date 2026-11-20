@@ -48,7 +48,7 @@ enum FileApplierService {
     }
 
     static func normalizeContainerRelativePath(_ rawPath: String, targetBundleID: String) -> String {
-        var path = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        var path = rawPath.replacingOccurrences(of: "\\", with: "/").trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
         let bundlePrefix = targetBundleID.lowercased() + "/"
         if path.lowercased().hasPrefix(bundlePrefix) {
             path = String(path.dropFirst(bundlePrefix.count))
@@ -63,7 +63,32 @@ enum FileApplierService {
         return path.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
     }
 
-    static func inspectPackage(at url: URL) -> DetectedPackageInspection? {
+    static func guessBundleID(from filename: String, installedApps: [InstalledApp] = []) -> String? {
+        let lower = filename.lowercased()
+        if lower.contains("ffvn") || lower.contains("freefirevn") || lower.contains("free fire vn") {
+            return "com.garena.ffvn"
+        }
+        if lower.contains("ffmax") || lower.contains("freefiremax") || lower.contains("free fire max") {
+            return "com.dts.freefiremax"
+        }
+        if lower.contains("ffth") || lower.contains("freefireth") {
+            return "com.dts.freefireth"
+        }
+        if lower.contains("pubg") || lower.contains("vng.pubg") {
+            return "com.vng.pubgmobile"
+        }
+        if lower.contains("lqmb") || lower.contains("lienquan") || lower.contains("aov") {
+            return "com.garena.game.kgvn"
+        }
+        for app in installedApps {
+            if lower.contains(app.bundleID.lowercased()) || (!app.displayName.isEmpty && lower.contains(app.displayName.lowercased())) {
+                return app.bundleID
+            }
+        }
+        return nil
+    }
+
+    static func inspectPackage(at url: URL, password: String? = nil, installedApps: [InstalledApp] = []) -> DetectedPackageInspection? {
         let isScoped = url.startAccessingSecurityScopedResource()
         defer {
             if isScoped {
@@ -71,6 +96,7 @@ enum FileApplierService {
             }
         }
         guard let data = try? Data(contentsOf: url) else { return nil }
+        let guessedBundle = guessBundleID(from: url.lastPathComponent, installedApps: installedApps)
 
         // 1. Kiểm tra định dạng gói 3105 (3105PATCH)
         let magic = Data("3105PATCH\0".utf8)
@@ -86,6 +112,9 @@ enum FileApplierService {
                 // Nếu decode tiêu chuẩn thất bại (do kiểm tra nghiêm ngặt author/bundle), dùng decodeLenient
                 if decodedProject == nil && !summary.isPasswordProtected {
                     decodedProject = try? PatchPackageCodec.decodeLenient(data, password: nil)
+                }
+                if decodedProject == nil && summary.isPasswordProtected, let pass = password, !pass.isEmpty {
+                    decodedProject = try? PatchPackageCodec.decodeLenient(data, password: pass)
                 }
 
                 if let project = decodedProject {
@@ -104,11 +133,19 @@ enum FileApplierService {
                             isDirectory: true
                         )
                     }
-                    let bundle = project.allBundleIdentifiers.first
+                    let bundle = project.allBundleIdentifiers.first ?? guessedBundle
                     return DetectedPackageInspection(
                         payload: .patchProject(project: project),
                         suggestedBundleID: bundle,
-                        entries: entries
+                        entries: entries,
+                        isPasswordProtected: summary.isPasswordProtected
+                    )
+                } else if summary.isPasswordProtected {
+                    return DetectedPackageInspection(
+                        payload: .passwordProtected(packageID: summary.packageID),
+                        suggestedBundleID: guessedBundle,
+                        entries: [],
+                        isPasswordProtected: true
                     )
                 }
             }
@@ -132,11 +169,12 @@ enum FileApplierService {
                     isDirectory: true
                 )
             }
-            let bundle = project.allBundleIdentifiers.first
+            let bundle = project.allBundleIdentifiers.first ?? guessedBundle
             return DetectedPackageInspection(
                 payload: .patchProject(project: project),
                 suggestedBundleID: bundle,
-                entries: entries
+                entries: entries,
+                isPasswordProtected: false
             )
         }
 
@@ -156,8 +194,9 @@ enum FileApplierService {
                 }
                 return DetectedPackageInspection(
                     payload: .zipArchive(archiveURL: url),
-                    suggestedBundleID: nil,
-                    entries: entries
+                    suggestedBundleID: guessedBundle,
+                    entries: entries,
+                    isPasswordProtected: false
                 )
             }
         }
@@ -185,10 +224,23 @@ enum FileApplierService {
             throw FileApplierError.sourceMissing
         }
 
-        let containerPath = app.containerPath
-        guard !containerPath.isEmpty, fileManager.fileExists(atPath: containerPath) else {
-            throw FileApplierError.containerNotFound(app.bundleID)
+        var containerPath = app.containerPath
+        if containerPath.isEmpty || !fileManager.fileExists(atPath: containerPath) {
+            if let resolved = ContainerStore.resolveAppContainerPath(bundleID: app.bundleID),
+               fileManager.fileExists(atPath: resolved) {
+                containerPath = resolved
+            } else {
+                throw FileApplierError.containerNotFound(app.bundleID)
+            }
         }
+
+        let effectiveApp = InstalledApp(
+            bundleID: app.bundleID,
+            name: app.name,
+            containerPath: containerPath,
+            version: app.version,
+            icon: app.icon
+        )
 
         let accessGrant = ContainerStore.grantContainerAccess(containerPath)
         log("fileapplier: granted container access to \(containerPath), code=\(accessGrant)")
@@ -220,7 +272,7 @@ enum FileApplierService {
                 case .patchProject(let project):
                     createdRecords = try applyPatchProject(
                         project: project,
-                        to: app,
+                        to: effectiveApp,
                         autoBackup: autoBackup,
                         fileManager: fileManager
                     )
@@ -233,8 +285,8 @@ enum FileApplierService {
                     createdRecords = try ZIPArchiveExtractor.extractEntriesDirectly(
                         archiveURL: archiveURL,
                         into: containerURL,
-                        bundleID: app.bundleID,
-                        appName: app.displayName,
+                        bundleID: effectiveApp.bundleID,
+                        appName: effectiveApp.displayName,
                         autoBackup: autoBackup,
                         backupRootURL: backupRoot,
                         fileManager: fileManager
@@ -251,12 +303,42 @@ enum FileApplierService {
                     }
                 }
 
-                let summary = "Đã đưa \(createdRecords.count) tệp từ “\(firstURL.lastPathComponent)” vào đúng các thư mục tương ứng trong \(app.displayName)."
+                let summary = "Đã đưa \(createdRecords.count) tệp từ “\(firstURL.lastPathComponent)” vào đúng các thư mục tương ứng trong \(effectiveApp.displayName)."
                 return FileApplierResult(
                     records: createdRecords,
                     totalBytes: totalBytes,
                     summaryMessage: summary
                 )
+            }
+
+            // Nếu là tệp .3105: Cố gắng giải mã và đưa thẳng vào đúng cấu trúc nội bộ của app
+            if firstURL.pathExtension.lowercased() == "3105" {
+                if let data = try? Data(contentsOf: firstURL) {
+                    if let project = (try? PatchPackageCodec.decodeLenient(data, password: nil))
+                        ?? (try? PatchPackageCodec.decode(data, password: nil).project) {
+                        createdRecords = try applyPatchProject(
+                            project: project,
+                            to: effectiveApp,
+                            autoBackup: autoBackup,
+                            fileManager: fileManager
+                        )
+                        for r in createdRecords {
+                            totalBytes += r.fileSizeBytes
+                        }
+                        DispatchQueue.main.async {
+                            for record in createdRecords {
+                                FileApplierHistoryStore.shared.add(record)
+                            }
+                        }
+                        let summary = "Đã đưa \(createdRecords.count) tệp từ “\(firstURL.lastPathComponent)” vào đúng các thư mục tương ứng trong \(effectiveApp.displayName)."
+                        return FileApplierResult(
+                            records: createdRecords,
+                            totalBytes: totalBytes,
+                            summaryMessage: summary
+                        )
+                    }
+                }
+                throw FileApplierError.applyFailed("Không thể giải mã tệp .3105 này (tệp có thể yêu cầu mật khẩu hoặc không đúng định dạng). Gói .3105 không được sao chép trực tiếp vào Documents.")
             }
         }
 
@@ -287,7 +369,7 @@ enum FileApplierService {
                     sourceURL: sourceURL,
                     targetDirectoryURL: targetDirectoryURL,
                     relativeDir: cleanRelativeDir,
-                    app: app,
+                    app: effectiveApp,
                     autoBackup: autoBackup,
                     fileManager: fileManager
                 )
@@ -298,7 +380,7 @@ enum FileApplierService {
                     sourceURL: sourceURL,
                     targetDirectoryURL: targetDirectoryURL,
                     relativeDir: cleanRelativeDir,
-                    app: app,
+                    app: effectiveApp,
                     autoBackup: autoBackup,
                     fileManager: fileManager
                 )
@@ -314,7 +396,7 @@ enum FileApplierService {
             }
         }
 
-        let summary = "Đã áp dụng \(createdRecords.count) mục vào \(app.displayName)."
+        let summary = "Đã áp dụng \(createdRecords.count) mục vào \(effectiveApp.displayName)."
         return FileApplierResult(
             records: createdRecords,
             totalBytes: totalBytes,

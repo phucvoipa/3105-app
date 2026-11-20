@@ -209,12 +209,14 @@ struct PackageEntryItem: Identifiable, Hashable {
 enum DetectedPackagePayload {
     case patchProject(project: PatchProject)
     case zipArchive(archiveURL: URL)
+    case passwordProtected(packageID: UUID)
 }
 
 struct DetectedPackageInspection {
     let payload: DetectedPackagePayload
     let suggestedBundleID: String?
     let entries: [PackageEntryItem]
+    let isPasswordProtected: Bool
 
     var hasInternalPaths: Bool {
         !entries.isEmpty
@@ -226,6 +228,8 @@ struct DetectedPackageInspection {
             return project.name.isEmpty ? "Gói Patch 3105" : project.name
         case .zipArchive:
             return "Tệp nén lưu trữ (Archive)"
+        case .passwordProtected:
+            return "Gói Patch 3105 (Có mật khẩu)"
         }
     }
 }
