@@ -294,6 +294,9 @@ enum FileApplierService {
                     for r in createdRecords {
                         totalBytes += r.fileSizeBytes
                     }
+
+                case .passwordProtected:
+                    throw FileApplierError.applyFailed("Tệp .3105 này có mật khẩu bảo vệ. Vui lòng mở khóa trước khi áp dụng.")
                 }
 
                 // Lưu vào lịch sử
