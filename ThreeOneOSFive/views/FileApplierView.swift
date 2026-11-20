@@ -51,8 +51,9 @@ struct FileApplierView: View {
     }
 
     private var effectiveRelativePath: String {
-        if selectedPreset == .custom {
-            return customPath.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        let trimmed = customPath.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+        if !trimmed.isEmpty {
+            return trimmed
         }
         return selectedPreset.relativePath
     }
@@ -440,9 +441,7 @@ struct FileApplierView: View {
                         ForEach(TargetDestinationPreset.allCases) { preset in
                             Button {
                                 selectedPreset = preset
-                                if preset != .custom {
-                                    customPath = preset.relativePath
-                                }
+                                customPath = preset.relativePath
                             } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: preset.systemImage)
@@ -467,6 +466,38 @@ struct FileApplierView: View {
                             .buttonStyle(.plain)
                         }
                     }
+                }
+
+                // Nút duyệt chọn thư mục trực tiếp trong app
+                if let app = selectedApp {
+                    Button {
+                        isShowingContainerBrowser = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "folder.badge.gearshape")
+                                .font(.system(size: 20))
+                                .foregroundStyle(AppTheme.accent)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Duyệt chọn thư mục trong \(app.displayName)...")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text("Bấm vào đây để chọn đúng thư mục đích (hoặc file gốc cần đè)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(12)
+                        .background(AppTheme.accent.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 // Custom relative path field
@@ -494,14 +525,30 @@ struct FileApplierView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
 
-                if selectedApp != nil {
-                    Button {
-                        isShowingContainerBrowser = true
-                    } label: {
-                        Label(language.text("apply.browse_container"), systemImage: "magnifyingglass")
-                            .font(.caption.weight(.medium))
+                // Preview đường dẫn đích thực tế
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Đích đến của tệp khi áp dụng:")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "arrow.right.circle.fill")
                             .foregroundStyle(AppTheme.accent)
+                            .font(.subheadline)
+                            .padding(.top, 2)
+
+                        let appNameText = selectedApp?.bundleID ?? "[Chưa chọn App]"
+                        let targetFolder = effectiveRelativePath.isEmpty ? "(Thư mục gốc)" : effectiveRelativePath
+                        let fileNames = selectedSourceURLs.isEmpty ? "[Tên tệp]" : selectedSourceURLs.map(\.lastPathComponent).joined(separator: ", ")
+                        Text("\(appNameText) ➔ / \(targetFolder) / \(fileNames)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.primary)
+                            .lineLimit(3)
                     }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(uiColor: .tertiarySystemFill))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
             }
             .padding(14)
@@ -725,16 +772,45 @@ struct FileApplierView: View {
 
     private func handleFileSelection(_ urls: [URL]) {
         selectedSourceURLs = urls
-        if let first = urls.first {
-            // Auto suggest path
-            let ext = first.pathExtension.lowercased()
-            if ext == "plist" {
-                selectedPreset = .preferences
-                customPath = "Library/Preferences"
-            } else if ext == "zip" {
-                selectedPreset = .documents
-                customPath = "Documents"
+        guard let first = urls.first else { return }
+
+        // 1. Nếu là file .3105: tự động đọc target app và target path từ project
+        if first.pathExtension.lowercased() == "3105" {
+            if let patchInfo = FileApplierService.detectPatchPackage(at: first) {
+                if let targetBundle = patchInfo.bundleID, !targetBundle.isEmpty {
+                    if let found = discovery.apps.first(where: { $0.bundleID.lowercased() == targetBundle.lowercased() }) {
+                        selectedApp = found
+                    } else {
+                        let path = ContainerStore.resolveAppContainerPath(bundleID: targetBundle) ?? ""
+                        selectedApp = InstalledApp(
+                            bundleID: targetBundle,
+                            name: targetBundle,
+                            containerPath: path,
+                            version: "",
+                            icon: nil
+                        )
+                    }
+                }
+
+                if let relPath = patchInfo.relativePath, !relPath.isEmpty {
+                    customPath = relPath
+                    selectedPreset = .custom
+                    return
+                }
             }
+        }
+
+        // 2. Gợi ý đường dẫn thông minh theo định dạng file
+        let ext = first.pathExtension.lowercased()
+        if ext == "plist" {
+            selectedPreset = .preferences
+            customPath = "Library/Preferences"
+        } else if ext == "zip" {
+            selectedPreset = .documents
+            customPath = "Documents"
+        } else if customPath.isEmpty {
+            selectedPreset = .documents
+            customPath = "Documents"
         }
     }
 

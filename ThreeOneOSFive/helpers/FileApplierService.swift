@@ -47,6 +47,23 @@ enum FileApplierService {
         return root
     }
 
+    static func detectPatchPackage(at url: URL) -> (bundleID: String?, relativePath: String?)? {
+        let isScoped = url.startAccessingSecurityScopedResource()
+        defer {
+            if isScoped {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        guard let data = try? Data(contentsOf: url),
+              let decoded = try? PatchPackageCodec.decode(data, password: nil) else {
+            return nil
+        }
+        let project = decoded.project
+        let targetBundle = project.allBundleIdentifiers.first
+        let targetPath = project.rules.first?.relativePath ?? project.directories.first?.relativePath
+        return (targetBundle, targetPath)
+    }
+
     static func apply(
         sourceURLs: [URL],
         to app: InstalledApp,
