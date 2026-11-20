@@ -216,7 +216,7 @@ enum FileApplierService {
         // Extract ZIP
         do {
             let result = try ZIPArchiveExtractor.extract(archiveURL: sourceURL, into: targetDirectoryURL, fileManager: fileManager)
-            log("fileapplier: extracted \(result.entryCount) items from \(fileName) into \(targetDirectoryURL.path)")
+            log("fileapplier: extracted \(result.fileCount) items from \(fileName) into \(targetDirectoryURL.path)")
         } catch {
             throw FileApplierError.zipExtractionFailed(error.localizedDescription)
         }
