@@ -24,6 +24,14 @@ struct ZIPArchiveExtractionResult: Equatable {
     let expandedBytes: Int64
 }
 
+struct ZIPEntrySummary: Equatable, Identifiable {
+    var id: String { path }
+    let path: String
+    let components: [String]
+    let isDirectory: Bool
+    let uncompressedSize: UInt64
+}
+
 enum ZIPArchiveExtractor {
     private struct Entry {
         let components: [String]
@@ -136,6 +144,131 @@ enum ZIPArchiveExtractor {
         } catch {
             throw ZIPArchiveExtractorError.extractionFailed
         }
+    }
+
+    static func inspect(archiveURL: URL) throws -> [ZIPEntrySummary] {
+        let archive = archiveURL.standardizedFileURL
+        let archiveValues = try archive.resourceValues(
+            forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]
+        )
+        guard archiveValues.isRegularFile == true,
+              archiveValues.isDirectory != true,
+              archiveValues.isSymbolicLink != true,
+              let archiveSizeValue = archiveValues.fileSize,
+              archiveSizeValue >= 22 else {
+            throw ZIPArchiveExtractorError.invalidArchive
+        }
+        let handle = try FileHandle(forReadingFrom: archive)
+        defer { try? handle.close() }
+        let entries = try readEntries(handle: handle, archiveSize: UInt64(archiveSizeValue))
+        return entries.map {
+            ZIPEntrySummary(
+                path: $0.components.joined(separator: "/"),
+                components: $0.components,
+                isDirectory: $0.isDirectory,
+                uncompressedSize: $0.uncompressedSize
+            )
+        }
+    }
+
+    static func extractEntriesDirectly(
+        archiveURL: URL,
+        into containerURL: URL,
+        bundleID: String,
+        appName: String,
+        autoBackup: Bool,
+        backupRootURL: URL,
+        fileManager: FileManager = .default
+    ) throws -> [FileApplierRecord] {
+        let archive = archiveURL.standardizedFileURL
+        let archiveValues = try archive.resourceValues(
+            forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]
+        )
+        guard archiveValues.isRegularFile == true,
+              archiveValues.isDirectory != true,
+              archiveValues.isSymbolicLink != true,
+              let archiveSizeValue = archiveValues.fileSize,
+              archiveSizeValue >= 22 else {
+            throw ZIPArchiveExtractorError.invalidArchive
+        }
+        let handle = try FileHandle(forReadingFrom: archive)
+        defer { try? handle.close() }
+        let entries = try readEntries(handle: handle, archiveSize: UInt64(archiveSizeValue))
+
+        var records: [FileApplierRecord] = []
+        let timestamp = Int(Date().timeIntervalSince1970)
+
+        for entry in entries {
+            var relComponents = entry.components
+            if let first = relComponents.first, first.lowercased() == bundleID.lowercased() {
+                relComponents.removeFirst()
+            }
+            guard !relComponents.isEmpty else { continue }
+            let relPath = relComponents.joined(separator: "/")
+            let targetURL = containerURL.appendingPathComponent(relPath)
+
+            if entry.isDirectory {
+                try fileManager.createDirectory(at: targetURL, withIntermediateDirectories: true)
+                continue
+            }
+
+            try fileManager.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+            var backupRelativePath: String?
+            if fileManager.fileExists(atPath: targetURL.path) && autoBackup {
+                let backupSubdir = "\(bundleID)/\(timestamp)"
+                let backupDir = backupRootURL.appendingPathComponent(backupSubdir, isDirectory: true)
+                try fileManager.createDirectory(at: backupDir, withIntermediateDirectories: true)
+                let backupFile = backupDir.appendingPathComponent(relPath)
+                try fileManager.createDirectory(at: backupFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? fileManager.removeItem(at: backupFile)
+                do {
+                    try fileManager.copyItem(at: targetURL, to: backupFile)
+                    backupRelativePath = "\(backupSubdir)/\(relPath)"
+                } catch {
+                    log("fileapplier: zip backup warning for \(relPath): \(error.localizedDescription)")
+                }
+            }
+
+            let tempTarget = containerURL.appendingPathComponent(".3105-extract-\(UUID().uuidString)")
+            defer { try? fileManager.removeItem(at: tempTarget) }
+
+            let status = archive.path.withCString { archivePath in
+                tempTarget.path.withCString { targetPath in
+                    browserZIPExtractEntry(
+                        archivePath,
+                        entry.dataOffset,
+                        entry.compressedSize,
+                        entry.compressionMethod,
+                        targetPath,
+                        entry.uncompressedSize,
+                        entry.crc32
+                    )
+                }
+            }
+            guard status == 0 else {
+                throw ZIPArchiveExtractorError.extractionFailed
+            }
+
+            if fileManager.fileExists(atPath: targetURL.path) {
+                _ = try FileReplacementService.replace(target: targetURL, with: tempTarget, fileManager: fileManager)
+            } else {
+                try fileManager.moveItem(at: tempTarget, to: targetURL)
+            }
+
+            let record = FileApplierRecord(
+                bundleID: bundleID,
+                appName: appName,
+                targetRelativePath: relPath,
+                sourceFileName: relComponents.last ?? "file",
+                fileSizeBytes: Int64(entry.uncompressedSize),
+                backupRelativePath: backupRelativePath,
+                isZipExtraction: true
+            )
+            records.append(record)
+        }
+
+        return records
     }
 
     private static func readEntries(

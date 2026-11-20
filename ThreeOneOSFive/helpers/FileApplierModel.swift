@@ -189,3 +189,44 @@ final class FileApplierCoordinator: ObservableObject {
         preselectedApp = nil
     }
 }
+
+// MARK: - Detected Package Models
+
+struct PackageEntryItem: Identifiable, Hashable {
+    var id: String { targetRelativePath }
+    let targetRelativePath: String
+    let fileName: String
+    let fileSizeBytes: Int64
+    let isDirectory: Bool
+
+    var formattedSize: String {
+        if isDirectory { return "Thư mục" }
+        if fileSizeBytes <= 0 { return "0 B" }
+        return ByteCountFormatter.string(fromByteCount: fileSizeBytes, countStyle: .file)
+    }
+}
+
+enum DetectedPackagePayload {
+    case patchProject(project: PatchProject)
+    case zipArchive(archiveURL: URL)
+}
+
+struct DetectedPackageInspection {
+    let payload: DetectedPackagePayload
+    let suggestedBundleID: String?
+    let entries: [PackageEntryItem]
+
+    var hasInternalPaths: Bool {
+        !entries.isEmpty
+    }
+
+    var packageTitle: String {
+        switch payload {
+        case .patchProject(let project):
+            return project.name.isEmpty ? "Gói Patch 3105" : project.name
+        case .zipArchive:
+            return "Tệp nén lưu trữ (Archive)"
+        }
+    }
+}
+
