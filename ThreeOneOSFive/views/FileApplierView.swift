@@ -159,17 +159,24 @@ struct FileApplierView: View {
                 )
             }
             .confirmationDialog(
-                language.text("apply.restore_confirm_title"),
+                "Khôi phục trạng thái ban đầu",
                 isPresented: $showRestoreConfirmation,
                 titleVisibility: .visible,
                 presenting: recordToRestore
             ) { record in
-                Button(language.text("apply.restore"), role: .destructive) {
+                Button(
+                    record.backupRelativePath != nil ? "Khôi phục file gốc" : "Gỡ bỏ file đã áp dụng",
+                    role: .destructive
+                ) {
                     performRestore(record)
                 }
                 Button(language.text("common.cancel"), role: .cancel) {}
             } message: { record in
-                Text(language.text("apply.restore_confirm_message", record.appName))
+                if record.backupRelativePath != nil {
+                    Text("Hệ thống sẽ ghi đè lại file gốc ban đầu vào \(record.appName).")
+                } else {
+                    Text("Hệ thống sẽ xóa file “\(record.sourceFileName)” khỏi thư mục của \(record.appName) để đưa game về nguyên trạng.")
+                }
             }
             .onAppear {
                 discovery.load(force: false)
@@ -613,16 +620,36 @@ struct FileApplierView: View {
     }
 
     private func historyRow(_ record: FileApplierRecord) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: record.isZipExtraction ? "archivebox.fill" : "doc.fill")
-                    .font(.system(size: 20))
+                    .font(.system(size: 22))
                     .foregroundStyle(AppTheme.accent)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(record.appName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(record.appName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        if record.backupRelativePath != nil {
+                            Text("Đã sao lưu gốc")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.blue.opacity(0.15))
+                                .foregroundStyle(.blue)
+                                .clipShape(Capsule())
+                        } else {
+                            Text("Tệp mới thêm")
+                                .font(.system(size: 9, weight: .bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15))
+                                .foregroundStyle(.orange)
+                                .clipShape(Capsule())
+                        }
+                    }
 
                     Text(record.targetRelativePath)
                         .font(.caption2.monospaced())
@@ -642,21 +669,31 @@ struct FileApplierView: View {
                 }
             }
 
+            Divider()
+
             HStack {
-                if record.backupRelativePath != nil {
-                    if record.isRestored {
-                        Label("Đã khôi phục", systemImage: "checkmark.circle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                    } else {
-                        Button {
-                            recordToRestore = record
-                            showRestoreConfirmation = true
-                        } label: {
-                            Label(language.text("apply.restore"), systemImage: "arrow.uturn.backward.circle.fill")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(AppTheme.accent)
+                if record.isRestored {
+                    Label(
+                        record.backupRelativePath != nil ? "Đã khôi phục file gốc" : "Đã gỡ bỏ file mod",
+                        systemImage: "checkmark.circle.fill"
+                    )
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                } else {
+                    Button {
+                        recordToRestore = record
+                        showRestoreConfirmation = true
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.uturn.backward.circle.fill")
+                            Text(record.backupRelativePath != nil ? "Khôi phục file gốc" : "Gỡ bỏ file (Khôi phục gốc)")
                         }
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(AppTheme.accent.opacity(0.15))
+                        .foregroundStyle(AppTheme.accent)
+                        .clipShape(Capsule())
                     }
                 }
 
@@ -668,6 +705,7 @@ struct FileApplierView: View {
                     Image(systemName: "trash")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .padding(4)
                 }
             }
         }
@@ -759,9 +797,12 @@ struct FileApplierView: View {
         do {
             try FileApplierService.restore(record: record)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
+            let msg = record.backupRelativePath != nil
+                ? "Đã khôi phục thành công file gốc vào \(record.appName).\n\n💡 Vui lòng vuốt tắt game trong đa nhiệm (App Switcher) rồi mở lại."
+                : "Đã gỡ bỏ file mod thành công khỏi \(record.appName).\n\n💡 Vui lòng vuốt tắt game trong đa nhiệm (App Switcher) rồi mở lại."
             alertNotice = FileApplierNotice(
-                title: language.text("apply.restore_success"),
-                message: "Đã hoàn tác và ghi lại file gốc vào \(record.appName)."
+                title: "Khôi phục thành công",
+                message: msg
             )
         } catch {
             UINotificationFeedbackGenerator().notificationOccurred(.error)

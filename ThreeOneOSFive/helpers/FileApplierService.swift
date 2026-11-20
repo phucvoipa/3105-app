@@ -239,17 +239,6 @@ enum FileApplierService {
         customContainerPath: String? = nil,
         fileManager: FileManager = .default
     ) throws {
-        guard let backupRelPath = record.backupRelativePath else {
-            throw FileApplierError.restoreFailed("Bản sao lưu không tồn tại hoặc mục này không có bản sao lưu.")
-        }
-
-        let backupRoot = try backupRootURL(fileManager: fileManager)
-        let backupFileURL = backupRoot.appendingPathComponent(backupRelPath)
-
-        guard fileManager.fileExists(atPath: backupFileURL.path) else {
-            throw FileApplierError.restoreFailed("Tệp sao lưu không còn tồn tại trên máy.")
-        }
-
         let containerPath: String
         if let custom = customContainerPath, !custom.isEmpty {
             containerPath = custom
@@ -263,17 +252,32 @@ enum FileApplierService {
 
         let targetFileURL = URL(fileURLWithPath: containerPath).appendingPathComponent(record.targetRelativePath)
 
-        if fileManager.fileExists(atPath: targetFileURL.path) {
-            _ = try FileReplacementService.replace(target: targetFileURL, with: backupFileURL, fileManager: fileManager)
+        if let backupRelPath = record.backupRelativePath {
+            // Trường hợp 1: Có bản sao lưu file gốc cũ -> Khôi phục đè lại file gốc
+            let backupRoot = try backupRootURL(fileManager: fileManager)
+            let backupFileURL = backupRoot.appendingPathComponent(backupRelPath)
+
+            guard fileManager.fileExists(atPath: backupFileURL.path) else {
+                throw FileApplierError.restoreFailed("Tệp sao lưu không còn tồn tại trên máy.")
+            }
+
+            if fileManager.fileExists(atPath: targetFileURL.path) {
+                _ = try FileReplacementService.replace(target: targetFileURL, with: backupFileURL, fileManager: fileManager)
+            } else {
+                try fileManager.createDirectory(at: targetFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.copyItem(at: backupFileURL, to: targetFileURL)
+            }
+            log("fileapplier: restored original backup for \(record.targetRelativePath)")
         } else {
-            try fileManager.createDirectory(at: targetFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fileManager.copyItem(at: backupFileURL, to: targetFileURL)
+            // Trường hợp 2: Tệp mod mới thêm vào -> Xóa tệp mod để đưa game về nguyên trạng ban đầu
+            if fileManager.fileExists(atPath: targetFileURL.path) {
+                try fileManager.removeItem(at: targetFileURL)
+                log("fileapplier: removed newly added mod file at \(targetFileURL.path)")
+            }
         }
 
         DispatchQueue.main.async {
             FileApplierHistoryStore.shared.markRestored(id: record.id)
         }
-
-        log("fileapplier: restored backup for \(record.targetRelativePath)")
     }
 }
