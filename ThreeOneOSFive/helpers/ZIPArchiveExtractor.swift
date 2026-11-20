@@ -397,14 +397,14 @@ enum ZIPArchiveExtractor {
         _ rawName: String,
         isDirectory: Bool
     ) throws -> [String] {
-        guard !rawName.isEmpty,
-              !rawName.hasPrefix("/"),
-              !rawName.contains("\\"),
-              !rawName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
-              rawName.utf8.count <= PatchPackageLimits.maximumPathBytes else {
+        let sanitized = rawName.replacingOccurrences(of: "\\", with: "/")
+        guard !sanitized.isEmpty,
+              !sanitized.hasPrefix("/"),
+              !sanitized.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              sanitized.utf8.count <= PatchPackageLimits.maximumPathBytes else {
             throw ZIPArchiveExtractorError.invalidArchive
         }
-        var components = rawName.split(
+        var components = sanitized.split(
             separator: "/",
             omittingEmptySubsequences: false
         ).map(String.init)

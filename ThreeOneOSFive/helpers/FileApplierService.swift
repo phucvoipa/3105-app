@@ -76,14 +76,19 @@ enum FileApplierService {
         let magic = Data("3105PATCH\0".utf8)
         if data.count > magic.count && data.prefix(magic.count) == magic {
             if let summary = try? PatchPackageCodec.inspect(data) {
-                var decoded: DecodedPatchPackage?
+                var decodedProject: PatchProject?
                 if let key = try? PatchKeyStore.load(for: summary) {
-                    decoded = try? PatchPackageCodec.decode(data, contentKey: key)
+                    decodedProject = try? PatchPackageCodec.decode(data, contentKey: key).project
                 }
-                if decoded == nil && !summary.isPasswordProtected {
-                    decoded = try? PatchPackageCodec.decode(data, password: nil)
+                if decodedProject == nil && !summary.isPasswordProtected {
+                    decodedProject = try? PatchPackageCodec.decode(data, password: nil).project
                 }
-                if let project = decoded?.project {
+                // Nếu decode tiêu chuẩn thất bại (do kiểm tra nghiêm ngặt author/bundle), dùng decodeLenient
+                if decodedProject == nil && !summary.isPasswordProtected {
+                    decodedProject = try? PatchPackageCodec.decodeLenient(data, password: nil)
+                }
+
+                if let project = decodedProject {
                     let entries = project.rules.map { rule in
                         PackageEntryItem(
                             targetRelativePath: rule.relativePath,
@@ -138,7 +143,8 @@ enum FileApplierService {
         // 3. Kiểm tra tệp ZIP (hoặc tệp .3105 chứa nội dung ZIP)
         let isZipHeader = data.count >= 4 && data[0] == 0x50 && data[1] == 0x4B
         let isZipExt = url.pathExtension.lowercased() == "zip"
-        if isZipHeader || isZipExt {
+        let is3105Ext = url.pathExtension.lowercased() == "3105"
+        if isZipHeader || isZipExt || is3105Ext {
             if let zipEntries = try? ZIPArchiveExtractor.inspect(archiveURL: url) {
                 let entries = zipEntries.map { entry in
                     PackageEntryItem(

@@ -193,6 +193,44 @@ enum PatchPackageCodec {
         }
     }
 
+    static func decodeLenient(_ data: Data, password: String? = nil) throws -> PatchProject {
+        let envelope = try parseEnvelope(data)
+        let contentKey: Data
+        if envelope.isPasswordProtected {
+            guard let password,
+                  !password.isEmpty,
+                  password.utf8.count <= PatchPackageLimits.maximumPasswordBytes,
+                  let salt = envelope.kdfSalt,
+                  let iterations = envelope.kdfIterations,
+                  let wrappedKey = envelope.wrappedContentKey
+            else {
+                throw PatchPackageError.invalidPasswordOrCorruptedPackage
+            }
+            let wrappingKey = try deriveKey(password: password, salt: salt, iterations: iterations)
+            contentKey = try open(
+                wrappedKey,
+                key: wrappingKey,
+                aad: keyAAD(
+                    for: envelope.packageID,
+                    version: envelope.keyAADVersion ?? envelope.schemaVersion
+                )
+            )
+        } else {
+            guard let storedKey = envelope.publicContentKey else {
+                throw PatchPackageError.invalidPasswordOrCorruptedPackage
+            }
+            contentKey = storedKey
+        }
+        let payloadData = try open(
+            envelope.encryptedPayload,
+            key: contentKey,
+            aad: payloadAAD(for: envelope.packageID, version: envelope.schemaVersion)
+        )
+        let decoder = PropertyListDecoder()
+        let payload = try decoder.decode(Payload.self, from: payloadData)
+        return payload.project
+    }
+
     static func update(
         _ originalData: Data,
         project: PatchProject,
