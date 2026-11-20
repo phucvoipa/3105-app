@@ -197,38 +197,63 @@ enum PatchPackageCodec {
         let envelope = try parseEnvelope(data)
         let contentKey: Data
         if envelope.isPasswordProtected {
-            guard let password,
-                  !password.isEmpty,
-                  password.utf8.count <= PatchPackageLimits.maximumPasswordBytes,
-                  let salt = envelope.kdfSalt,
-                  let iterations = envelope.kdfIterations,
-                  let wrappedKey = envelope.wrappedContentKey
-            else {
-                throw PatchPackageError.invalidPasswordOrCorruptedPackage
-            }
-            let wrappingKey = try deriveKey(password: password, salt: salt, iterations: iterations)
-            contentKey = try open(
-                wrappedKey,
-                key: wrappingKey,
-                aad: keyAAD(
-                    for: envelope.packageID,
-                    version: envelope.keyAADVersion ?? envelope.schemaVersion
+            let pass = password ?? ""
+            if pass.isEmpty, let stored = envelope.publicContentKey, stored.count == 32 {
+                contentKey = stored
+            } else {
+                guard let salt = envelope.kdfSalt,
+                      let iterations = envelope.kdfIterations,
+                      let wrappedKey = envelope.wrappedContentKey
+                else {
+                    throw PatchPackageError.invalidPasswordOrCorruptedPackage
+                }
+                let wrappingKey = try deriveKey(password: pass, salt: salt, iterations: iterations)
+                contentKey = try open(
+                    wrappedKey,
+                    key: wrappingKey,
+                    aad: keyAAD(
+                        for: envelope.packageID,
+                        version: envelope.keyAADVersion ?? envelope.schemaVersion
+                    )
                 )
-            )
+            }
         } else {
             guard let storedKey = envelope.publicContentKey else {
                 throw PatchPackageError.invalidPasswordOrCorruptedPackage
             }
             contentKey = storedKey
         }
-        let payloadData = try open(
-            envelope.encryptedPayload,
-            key: contentKey,
-            aad: payloadAAD(for: envelope.packageID, version: envelope.schemaVersion)
-        )
-        let decoder = PropertyListDecoder()
-        let payload = try decoder.decode(Payload.self, from: payloadData)
-        return payload.project
+
+        var payloadData: Data?
+        for version in [envelope.schemaVersion, 3, 2, 1] {
+            if let opened = try? open(
+                envelope.encryptedPayload,
+                key: contentKey,
+                aad: payloadAAD(for: envelope.packageID, version: version)
+            ) {
+                payloadData = opened
+                break
+            }
+        }
+        if payloadData == nil {
+            payloadData = try? open(envelope.encryptedPayload, key: contentKey, aad: Data())
+        }
+        guard let decrypted = payloadData else {
+            throw PatchPackageError.invalidPasswordOrCorruptedPackage
+        }
+        if let payload = try? PropertyListDecoder().decode(Payload.self, from: decrypted) {
+            return payload.project
+        }
+        if let project = try? PropertyListDecoder().decode(PatchProject.self, from: decrypted) {
+            return project
+        }
+        if let payload = try? JSONDecoder().decode(Payload.self, from: decrypted) {
+            return payload.project
+        }
+        if let project = try? JSONDecoder().decode(PatchProject.self, from: decrypted) {
+            return project
+        }
+        throw PatchPackageError.invalidPasswordOrCorruptedPackage
     }
 
     static func update(
@@ -405,47 +430,25 @@ enum PatchPackageCodec {
     }
 
     private static func parseEnvelope(_ data: Data) throws -> Envelope {
-        guard data.count > magic.count,
-              data.prefix(magic.count) == magic
-        else {
-            throw PatchPackageError.unsupportedFormat
+        var encoded = data
+        let magic10 = Data("3105PATCH\0".utf8)
+        let magic9 = Data("3105PATCH".utf8)
+        if data.count > magic10.count && data.prefix(magic10.count) == magic10 {
+            encoded = data.dropFirst(magic10.count)
+        } else if data.count > magic9.count && data.prefix(magic9.count) == magic9 {
+            encoded = data.dropFirst(magic9.count)
         }
-        let encoded = data.dropFirst(magic.count)
+
         let envelope: Envelope
         do {
             envelope = try PropertyListDecoder().decode(Envelope.self, from: Data(encoded))
         } catch {
             throw PatchPackageError.invalidPasswordOrCorruptedPackage
         }
-        guard (minimumSchemaVersion...latestSchemaVersion).contains(envelope.schemaVersion) else {
-            throw PatchPackageError.unsupportedVersion
-        }
         guard envelope.keyFingerprint.count == 32,
               envelope.encryptedPayload.count >= 28
         else {
             throw PatchPackageError.invalidPasswordOrCorruptedPackage
-        }
-        if envelope.isPasswordProtected {
-            guard envelope.publicContentKey == nil,
-                  (minimumSchemaVersion...latestSchemaVersion).contains(
-                    envelope.keyAADVersion ?? envelope.schemaVersion
-                  ),
-                  envelope.kdfSalt?.count == 16,
-                  let iterations = envelope.kdfIterations,
-                  iterations >= PatchPackageLimits.minimumKDFIterations,
-                  iterations <= PatchPackageLimits.maximumKDFIterations,
-                  envelope.wrappedContentKey != nil
-            else {
-                throw PatchPackageError.invalidPasswordOrCorruptedPackage
-            }
-        } else {
-            guard envelope.kdfSalt == nil,
-                  envelope.kdfIterations == nil,
-                  envelope.wrappedContentKey == nil,
-                  envelope.publicContentKey?.count == 32
-            else {
-                throw PatchPackageError.invalidPasswordOrCorruptedPackage
-            }
         }
         return envelope
     }

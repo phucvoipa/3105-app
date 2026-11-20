@@ -99,56 +99,45 @@ enum FileApplierService {
         let guessedBundle = guessBundleID(from: url.lastPathComponent, installedApps: installedApps)
 
         // 1. Kiểm tra định dạng gói 3105 (3105PATCH)
-        let magic = Data("3105PATCH\0".utf8)
-        if data.count > magic.count && data.prefix(magic.count) == magic {
-            if let summary = try? PatchPackageCodec.inspect(data) {
-                var decodedProject: PatchProject?
-                if let key = try? PatchKeyStore.load(for: summary) {
-                    decodedProject = try? PatchPackageCodec.decode(data, contentKey: key).project
-                }
-                if decodedProject == nil && !summary.isPasswordProtected {
-                    decodedProject = try? PatchPackageCodec.decode(data, password: nil).project
-                }
-                // Nếu decode tiêu chuẩn thất bại (do kiểm tra nghiêm ngặt author/bundle), dùng decodeLenient
-                if decodedProject == nil && !summary.isPasswordProtected {
-                    decodedProject = try? PatchPackageCodec.decodeLenient(data, password: nil)
-                }
-                if decodedProject == nil && summary.isPasswordProtected, let pass = password, !pass.isEmpty {
-                    decodedProject = try? PatchPackageCodec.decodeLenient(data, password: pass)
-                }
-
-                if let project = decodedProject {
-                    let entries = project.rules.map { rule in
-                        PackageEntryItem(
-                            targetRelativePath: rule.relativePath,
-                            fileName: rule.replacementFilename.isEmpty ? (rule.relativePath as NSString).lastPathComponent : rule.replacementFilename,
-                            fileSizeBytes: Int64(rule.replacementData.count),
-                            isDirectory: false
-                        )
-                    } + project.directories.map { dir in
-                        PackageEntryItem(
-                            targetRelativePath: dir.relativePath,
-                            fileName: (dir.relativePath as NSString).lastPathComponent,
-                            fileSizeBytes: 0,
-                            isDirectory: true
-                        )
-                    }
-                    let bundle = project.allBundleIdentifiers.first ?? guessedBundle
-                    return DetectedPackageInspection(
-                        payload: .patchProject(project: project),
-                        suggestedBundleID: bundle,
-                        entries: entries,
-                        isPasswordProtected: summary.isPasswordProtected
-                    )
-                } else if summary.isPasswordProtected {
-                    return DetectedPackageInspection(
-                        payload: .passwordProtected(packageID: summary.packageID),
-                        suggestedBundleID: guessedBundle,
-                        entries: [],
-                        isPasswordProtected: true
-                    )
-                }
+        var decodedProject: PatchProject?
+        if let project = (try? PatchPackageCodec.decodeLenient(data, password: password))
+            ?? (try? PatchPackageCodec.decode(data, password: password).project) {
+            decodedProject = project
+        } else if let summary = try? PatchPackageCodec.inspect(data) {
+            if let key = try? PatchKeyStore.load(for: summary) {
+                decodedProject = try? PatchPackageCodec.decode(data, contentKey: key).project
             }
+            if decodedProject == nil, !summary.isPasswordProtected {
+                decodedProject = try? PatchPackageCodec.decode(data, password: nil).project
+            }
+            if decodedProject == nil, let pass = password, !pass.isEmpty {
+                decodedProject = try? PatchPackageCodec.decode(data, password: pass).project
+            }
+        }
+
+        if let project = decodedProject {
+            let entries = project.rules.map { rule in
+                PackageEntryItem(
+                    targetRelativePath: rule.relativePath,
+                    fileName: rule.replacementFilename.isEmpty ? (rule.relativePath as NSString).lastPathComponent : rule.replacementFilename,
+                    fileSizeBytes: Int64(rule.replacementData.count),
+                    isDirectory: false
+                )
+            } + project.directories.map { dir in
+                PackageEntryItem(
+                    targetRelativePath: dir.relativePath,
+                    fileName: (dir.relativePath as NSString).lastPathComponent,
+                    fileSizeBytes: 0,
+                    isDirectory: true
+                )
+            }
+            let bundle = project.allBundleIdentifiers.first ?? guessedBundle
+            return DetectedPackageInspection(
+                payload: .patchProject(project: project),
+                suggestedBundleID: bundle,
+                entries: entries,
+                isPasswordProtected: false
+            )
         }
 
         // 2. Kiểm tra định dạng PatchProject raw (PropertyList hoặc JSON)
@@ -178,27 +167,22 @@ enum FileApplierService {
             )
         }
 
-        // 3. Kiểm tra tệp ZIP (hoặc tệp .3105 chứa nội dung ZIP)
-        let isZipHeader = data.count >= 4 && data[0] == 0x50 && data[1] == 0x4B
-        let isZipExt = url.pathExtension.lowercased() == "zip"
-        let is3105Ext = url.pathExtension.lowercased() == "3105"
-        if isZipHeader || isZipExt || is3105Ext {
-            if let zipEntries = try? ZIPArchiveExtractor.inspect(archiveURL: url) {
-                let entries = zipEntries.map { entry in
-                    PackageEntryItem(
-                        targetRelativePath: entry.path,
-                        fileName: entry.components.last ?? entry.path,
-                        fileSizeBytes: Int64(entry.uncompressedSize),
-                        isDirectory: entry.isDirectory
-                    )
-                }
-                return DetectedPackageInspection(
-                    payload: .zipArchive(archiveURL: url),
-                    suggestedBundleID: guessedBundle,
-                    entries: entries,
-                    isPasswordProtected: false
+        // 3. Kiểm tra tệp nén ZIP (hoặc gói .3105 được đóng gói dạng ZIP)
+        if let zipEntries = try? ZIPArchiveExtractor.inspect(archiveURL: url) {
+            let entries = zipEntries.map { entry in
+                PackageEntryItem(
+                    targetRelativePath: entry.path,
+                    fileName: entry.components.last ?? entry.path,
+                    fileSizeBytes: Int64(entry.uncompressedSize),
+                    isDirectory: entry.isDirectory
                 )
             }
+            return DetectedPackageInspection(
+                payload: .zipArchive(archiveURL: url),
+                suggestedBundleID: guessedBundle,
+                entries: entries,
+                isPasswordProtected: false
+            )
         }
 
         return nil
@@ -314,8 +298,8 @@ enum FileApplierService {
                 )
             }
 
-            // Nếu là tệp .3105: Cố gắng giải mã và đưa thẳng vào đúng cấu trúc nội bộ của app
-            if firstURL.pathExtension.lowercased() == "3105" {
+            // Nếu tệp .3105 hoặc ZIP chưa được giải nén ở trên, thử giải nén lại một lần nữa
+            if firstURL.pathExtension.lowercased() == "3105" || firstURL.pathExtension.lowercased() == "zip" {
                 if let data = try? Data(contentsOf: firstURL) {
                     if let project = (try? PatchPackageCodec.decodeLenient(data, password: nil))
                         ?? (try? PatchPackageCodec.decode(data, password: nil).project) {
@@ -341,7 +325,6 @@ enum FileApplierService {
                         )
                     }
                 }
-                throw FileApplierError.applyFailed("Không thể giải mã tệp .3105 này (tệp có thể yêu cầu mật khẩu hoặc không đúng định dạng). Gói .3105 không được sao chép trực tiếp vào Documents.")
             }
         }
 

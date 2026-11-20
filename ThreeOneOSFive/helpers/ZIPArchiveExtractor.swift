@@ -292,12 +292,10 @@ enum ZIPArchiveExtractor {
         let commentLength = Int(u16(tail, relativeEndOffset + 20))
         guard diskNumber == 0,
               centralDisk == 0,
-              diskEntries == entryCount,
               entryCount != 0xffff,
               centralSize != 0xffff_ffff,
               centralOffset != 0xffff_ffff,
-              relativeEndOffset + 22 + commentLength == tail.count,
-              UInt64(centralOffset) + UInt64(centralSize) == endOffset else {
+              relativeEndOffset + 22 + commentLength <= tail.count else {
             throw ZIPArchiveExtractorError.invalidArchive
         }
 
@@ -334,28 +332,31 @@ enum ZIPArchiveExtractor {
             }
 
             let nameData = try read(handle: handle, offset: cursor + 46, count: nameLength)
-            guard let rawName = String(data: nameData, encoding: .utf8) else {
-                throw ZIPArchiveExtractorError.invalidArchive
+            guard let rawName = String(data: nameData, encoding: .utf8)
+                ?? String(data: nameData, encoding: .ascii)
+                ?? String(data: nameData, encoding: .isoLatin1) else {
+                cursor += 46 + UInt64(variableCount)
+                continue
+            }
+            if rawName.contains("__MACOSX") || rawName.hasPrefix("._") {
+                cursor += 46 + UInt64(variableCount)
+                continue
             }
             let mode = UInt16((externalAttributes >> 16) & 0xffff)
             let fileType = mode & 0o170000
             guard fileType != 0o120000 else {
-                throw ZIPArchiveExtractorError.symbolicLinkUnsupported
-            }
-            guard fileType == 0 || fileType == 0o100000 || fileType == 0o040000 else {
-                throw ZIPArchiveExtractorError.invalidArchive
+                cursor += 46 + UInt64(variableCount)
+                continue
             }
             let isDirectory = rawName.hasSuffix("/") || fileType == 0o040000
-            let components = try safeComponents(rawName, isDirectory: isDirectory)
+            guard let components = try? safeComponents(rawName, isDirectory: isDirectory), !components.isEmpty else {
+                cursor += 46 + UInt64(variableCount)
+                continue
+            }
             let normalized = components.joined(separator: "/").lowercased()
-            guard seen[normalized] == nil else {
-                throw ZIPArchiveExtractorError.invalidArchive
+            if seen[normalized] == nil {
+                seen[normalized] = isDirectory
             }
-            for count in 1..<components.count {
-                let parent = components.prefix(count).joined(separator: "/").lowercased()
-                if seen[parent] == false { throw ZIPArchiveExtractorError.invalidArchive }
-            }
-            seen[normalized] = isDirectory
 
             let localHeader = try read(handle: handle, offset: UInt64(localOffset), count: 30)
             guard u32(localHeader, 0) == localHeaderSignature,
@@ -397,20 +398,25 @@ enum ZIPArchiveExtractor {
         _ rawName: String,
         isDirectory: Bool
     ) throws -> [String] {
-        let sanitized = rawName.replacingOccurrences(of: "\\", with: "/")
+        var sanitized = rawName.replacingOccurrences(of: "\\", with: "/")
+        while sanitized.hasPrefix("/") || sanitized.hasPrefix("./") {
+            if sanitized.hasPrefix("/") {
+                sanitized = String(sanitized.dropFirst())
+            } else if sanitized.hasPrefix("./") {
+                sanitized = String(sanitized.dropFirst(2))
+            }
+        }
+        sanitized = sanitized.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
         guard !sanitized.isEmpty,
-              !sanitized.hasPrefix("/"),
-              !sanitized.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
               sanitized.utf8.count <= PatchPackageLimits.maximumPathBytes else {
             throw ZIPArchiveExtractorError.invalidArchive
         }
         var components = sanitized.split(
             separator: "/",
-            omittingEmptySubsequences: false
-        ).map(String.init)
+            omittingEmptySubsequences: true
+        ).map(String.init).filter { $0 != "." && !$0.isEmpty }
         if isDirectory, components.last == "" { components.removeLast() }
-        guard !components.isEmpty,
-              components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+        guard !components.isEmpty, components.allSatisfy({ $0 != ".." }) else {
             throw ZIPArchiveExtractorError.invalidArchive
         }
         return components
