@@ -22,7 +22,6 @@ jobs:
           echo "Selecting default Xcode with pre-installed simulator runtime:"
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           sudo xcodebuild -runFirstLaunch || true
-          xcrun simctl list runtimes || true
           xcodebuild -version
 
       - name: Locate Project & Build Application
@@ -31,6 +30,7 @@ jobs:
             cd 3105-main
           fi
 
+          set -o pipefail
           xcodebuild clean build \
             -project ThreeOneOSFive.xcodeproj \
             -scheme 3105 \
@@ -43,7 +43,13 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             COMPILER_INDEX_STORE_ENABLE=NO \
             ENABLE_PREVIEWS=NO \
-            -derivedDataPath ./build/DerivedData
+            -derivedDataPath ./build/DerivedData 2>&1 | tee build_output.log || {
+              echo ""
+              echo "==================== BUILD ERROR DETAILS ===================="
+              grep -E "error:|fatal error:|BUILD FAILED" build_output.log | tail -n 50 || true
+              echo "============================================================="
+              exit 1
+            }
 
       - name: Create IPA Package
         run: |

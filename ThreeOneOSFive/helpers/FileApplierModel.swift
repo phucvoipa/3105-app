@@ -101,7 +101,6 @@ struct FileApplierRecord: Identifiable, Codable, Equatable {
 
 // MARK: - History Store
 
-@MainActor
 final class FileApplierHistoryStore: ObservableObject {
     static let shared = FileApplierHistoryStore()
 
@@ -171,7 +170,6 @@ final class FileApplierHistoryStore: ObservableObject {
 
 // MARK: - Coordinator
 
-@MainActor
 final class FileApplierCoordinator: ObservableObject {
     static let shared = FileApplierCoordinator()
 

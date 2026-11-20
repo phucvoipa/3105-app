@@ -15,10 +15,11 @@ struct FileApplierNotice: Identifiable {
     }
 }
 
+@MainActor
 struct FileApplierView: View {
     @Environment(\.appLanguage) private var language
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var historyStore = FileApplierHistoryStore.shared
+    @ObservedObject private var historyStore = FileApplierHistoryStore.shared
     @ObservedObject private var discovery = AppDiscoveryService.shared
     @ObservedObject private var coordinator = FileApplierCoordinator.shared
 
@@ -775,6 +776,7 @@ struct FileApplierView: View {
 
 // MARK: - App Picker Sheet
 
+@MainActor
 struct AppPickerSheet: View {
     @Environment(\.appLanguage) private var language
     let apps: [InstalledApp]
@@ -917,6 +919,7 @@ struct AppPickerSheet: View {
 
 // MARK: - App Container Picker Sheet
 
+@MainActor
 struct AppContainerPickerSheet: View {
     @Environment(\.appLanguage) private var language
     let app: InstalledApp

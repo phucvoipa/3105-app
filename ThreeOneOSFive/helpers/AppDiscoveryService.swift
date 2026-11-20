@@ -1,7 +1,6 @@
 import Foundation
 import UIKit
 
-@MainActor
 final class AppDiscoveryService: ObservableObject {
     static let shared = AppDiscoveryService()
 
