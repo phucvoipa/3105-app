@@ -1,0 +1,66 @@
+name: Build 3105 IPA
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build iOS IPA
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode Version
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.2.app || sudo xcode-select -s /Applications/Xcode_16.app || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Locate Project & Build Application
+        run: |
+          if [ -d "./3105-main/ThreeOneOSFive.xcodeproj" ]; then
+            cd 3105-main
+          fi
+
+          xcodebuild clean build \
+            -project ThreeOneOSFive.xcodeproj \
+            -scheme 3105 \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            -derivedDataPath ./build/DerivedData
+
+      - name: Create IPA Package
+        run: |
+          PROJECT_DIR="."
+          if [ -d "./3105-main/ThreeOneOSFive.xcodeproj" ]; then
+            PROJECT_DIR="./3105-main"
+          fi
+
+          mkdir -p "$PROJECT_DIR/build/Payload"
+          APP_PATH=$(find "$PROJECT_DIR/build/DerivedData" -name "3105.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: 3105.app not found!"
+            exit 1
+          fi
+          echo "Found app at: $APP_PATH"
+          cp -R "$APP_PATH" "$PROJECT_DIR/build/Payload/"
+          cd "$PROJECT_DIR/build"
+          zip -qr 3105.ipa Payload
+          ls -la 3105.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3105-IPA
+          path: "**/build/3105.ipa"
+          if-no-files-found: error
