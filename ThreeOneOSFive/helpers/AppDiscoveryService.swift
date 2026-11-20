@@ -103,8 +103,9 @@ final class AppDiscoveryService: ObservableObject {
                 $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
             }
 
-            DispatchQueue.main.async {
-                self?.apps = result
+            let finalApps = result
+            DispatchQueue.main.async { [weak self] in
+                self?.apps = finalApps
                 self?.isLoading = false
                 self?.isResolving = false
             }

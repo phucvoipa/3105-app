@@ -717,7 +717,7 @@ struct FileApplierView: View {
 
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let result = try FileApplierService.apply(
+                _ = try FileApplierService.apply(
                     sourceURLs: sources,
                     to: app,
                     destinationRelativeDir: relDir,
